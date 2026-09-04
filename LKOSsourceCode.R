@@ -1,4 +1,5 @@
 library(EbayesThresh)
+library(copula)
 
 
 # eg. phi(x,2) = x(1-log(x))
@@ -23,6 +24,13 @@ phiFin <- function(x, k, n){ ## note here n is block size not sample size
     y*sum( choose(n,0:(k-1)) * (1-y^(-1/n))^(0:(k-1)) *(-1)^(0:(k-1)) )
   })
 }
+
+#inverse of phi_{k,n}(x) for finite block size n
+inv_phiFin <- function(x, k, n){
+  t <- 1 - qbeta(1-x, k, n-k+1)
+  return(t^n)
+}
+
 
 # generate a sample of size n from a copula for the largest k order statistics
 rcop <- function(n, k){
@@ -53,7 +61,7 @@ rcopFin <- function(n, k, blockSize){
   p <- U1 # running product 
   for(j in 2:k){  # index j tracks which copula column we are updating
     p <- p * W[,(j-1)]^(n/(n-j+1)) # update the product with each W_i; j-1 because the Ws are off set by 1 
-    U[,j] <- phiFin(p, k, blockSize) 
+    U[,j] <- phiFin(p, j, blockSize) 
   }
   
   return(U)
@@ -81,22 +89,16 @@ RtransLim <- function(data){
 
 # adjusting Rosenblatt test to account for finite block size
 
-F2 <- function(y, n){
-  return(n*y^(n-1) - (n-1)*y^(n))
-}
-F2_inverse <- function(x, n){
-  f <- function(y) F2(y, n) - x
-  uniroot(f, interval = c(0, 1), tol = 1e-10)$root
-}
-
 
 # helper function
 vecRtransFin <- function(u, n){
-  k <- length(u) # should always be 2
+  k <- length(u) 
   e <- numeric(k)
   
   e[1] <- u[1] # first is unchanged
-  e[2] <- (u[1]^((1/n) - 1))*(F2_inverse(u[2], n)^(n-1))
+  
+  j<-2:k
+  e[j] <- (inv_phiFin(u[j], j, n) / inv_phiFin(u[j-1] , j-1, n))^( (n-j+1)/n ) 
   e
 }
 
