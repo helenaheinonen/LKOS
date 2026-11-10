@@ -21,7 +21,7 @@ inv_phi <- function(x, k){
 #phi_{k,n}(x) for finite block size n 
 phiFin <- function(x, k, n){ ## note here n is block size not sample size 
   sapply(x, function(y){
-    y*sum( choose(n,0:(k-1)) * (1-y^(-1/n))^(0:(k-1)) *(-1)^(0:(k-1)) )
+    y*sum( choose(n,0:(k-1)) * (y^(-1/n)-1)^(0:(k-1)))  
   })
 }
 
@@ -30,7 +30,6 @@ inv_phiFin <- function(x, k, n){
   t <- 1 - qbeta(1-x, k, n-k+1)
   return(t^n)
 }
-
 
 # generate a sample of size n from a copula for the largest k order statistics
 rcop <- function(n, k){
@@ -89,6 +88,15 @@ RtransLim <- function(data){
 
 # adjusting Rosenblatt test to account for finite block size
 
+F2 <- function(y, n){
+  return(n*y^(n-1) - (n-1)*y^(n))
+}
+F2_inverse <- function(x, n){
+  f <- function(y) F2(y, n) - x
+  uniroot(f, interval = c(0, 1), tol = 1e-10)$root
+}
+
+
 
 # helper function
 vecRtransFin <- function(u, n){
@@ -111,30 +119,34 @@ RtransFin <- function(data, n){
 
 
 
-#setting up bootstrap process (for k = 2)
+#setting up bootstrap process 
 
-# joint empirical CDF 
-D <- function(s,t,data){
-  return(mean(data[,1] <= s & data[,2]<= t))
+
+# joint empirical CDF evaluated at u
+# in the testing process, input data should be pobs 
+D <- function(u, data){
+  if (length(u) != ncol(data)) {
+    stop("Length of u must match number of columns.")
+  }
+  return(mean(apply(data <= matrix(u, nrow(data), length(u), byrow = TRUE), 1, all)))
 }
+
 
 # input a copula sample 
 # computes test stat (distance from the indep copula)
+# this is test stat S_n^c from Genest copula paper (cramer-von mises)
 testStat<-function(data){
   sum(
     apply(data, 1, function(row) { #apply this function to each row of data
-      (D(row[1], row[2], data) - row[1] * row[2])^2
+      (D(row, data) - prod(row))^2
     })
     )
 }
 
 
-## TO DO: adjust RosenblattTest function to take input k
-## so that it tests whether the inputted sample comes from the k-extremal copula
-## Not just from k=2 largest and second largest 
-
 # reports p-value for rosenblatt goodness of fit test
 # input a copula sample of largest and second largest (not Rosenblatt transformed)
+# this should be pobs of the data
 # finite = TRUE means you are testing the finite block size copula, n = block size
 # finite = FALSE testing the limit copula 
 # bootstraps = number of bootstraps 
@@ -146,6 +158,8 @@ rosenblattTest <- function(sample, finite = FALSE, n = NULL, bootstraps = 1000){
   
   # Test statistic for the observed sample
   if (finite) {
+    # we do the testStat of the transformed sample since after transforming it should be indep
+    # computes cramer-von mises difference to the indep cop 
     testStat.sample <- testStat(RtransFin(sample, n))
   } else {
     testStat.sample <- testStat(RtransLim(sample))
