@@ -184,44 +184,18 @@ testStat<-function(data){
 }
 
 
-# reports p-value for rosenblatt goodness of fit test
-# input a copula sample (pobs) of largest and second largest (not Rosenblatt transformed)
-# finite = TRUE means you are testing the finite block size copula, n = block size
-# finite = FALSE testing the limit copula 
-# bootstraps = number of bootstraps 
-rosenblattTest <- function(sample, finite = FALSE, n = NULL, bootstraps = 1000){
+# generates dist of test statistics from the null 
+# n = sample size
+# k = LKOS
+# finite = true/false if we want to test C_{k} vs. C_{k,b}
+# if finite = true, then must input b for the finite block size 
+# boot = how many bootstrapped samples (default 1000)
+nullDistSim <- function(n, k, finite = FALSE, b = NULL, boot = 1000 ){
   
-  if (finite && is.null(n)) {
-      stop("Please provide n when finite = TRUE.")
+  if (finite && is.null(b)) {
+    stop("Please provide block size when finite = TRUE.")
   }
   
-  # Test statistic for the observed sample
-  if (finite) {
-    # we do the testStat of the transformed sample since after transforming it should be indep
-    # computes cramer-von mises difference to the indep cop 
-    testStat.sample <- testStat(RtransFin(sample, n))
-  } else {
-    testStat.sample <- testStat(RtransLim(sample))
-  }
-
-  # bootstrapped test stat
-  
-  # testStat.bootstrapped <- replicate(bootstraps, {
-  #     if (finite){
-  #         # simulate from null copula 
-  #         hyp_cop <- rcopFin(nrow(sample), k = ncol(sample), blockSize = n)
-  #         hyp_cop <- pobs(hyp_cop) # ranks
-  #         # no need for estimation bc no theta
-  #         transformed <- RtransFin(hyp_cop, n) #rosenblatt
-  #     }
-  #     else{ # testing against limit copula 
-  #       hyp_cop <- rcop(nrow(sample), k = ncol(sample))
-  #       hyp_cop <- pobs(hyp_cop)
-  #       # no theta
-  #       transformed <- RtransLim(hyp_cop) #rosenblatt 
-  #     }
-  #     testStat(transformed)
-  # })
   L <- as.list(rep(nrow(sample),bootstraps)) #list to contain the bootstrap replicates
   if(finite){
     # generate boot replicates from the null
@@ -236,10 +210,101 @@ rosenblattTest <- function(sample, finite = FALSE, n = NULL, bootstraps = 1000){
     L <- lapply(L, FUN=function(l){pobs(l)})
     M <- lapply(L,FUN=function(sample){testStat(RtransLim(sample))})
   }
-  # M is a list that contains all the test stats of the bootstrap samples 
-  testStat.bootstrapped <- unlist(M)
-  mean(testStat.bootstrapped > testStat.sample)
+  return(list(
+    nullStats = unlist(M),
+    n = n,
+    k = k,
+    finite = finite,
+    b = b,
+    boot = boot
+  ))
 }
+
+# reports p-value for rosenblatt goodness of fit test
+# input a copula sample (pobs) of LKOS (not Rosenblatt transformed)
+# and an object returned from the nullDistSim function to test against that null 
+rosenblattTest <- function(sample, nullDist){
+  if (nrow(sample) != nullDist$n){
+    stop("Sample size must be equal to sample size from null.")
+  }
+
+  # first we extract all the info from the nullDist so we what we're testing
+  nullStats <- nullDist$nullStats
+  n <- nrow(sample)
+  k <- nullDist$k
+  finite <- nullDist$finite
+  b <- nullDist$b # block size (if doing finite block test)
+  boot <- nullDist$boot
+  
+  # test statistic of the observed sample 
+    if (finite) {
+      # we do the testStat of the transformed sample since after transforming it should be indep
+      # computes cramer-von mises difference to the indep cop
+      # this is Sn^c from genest paper 
+      testStat.sample <- testStat(RtransFin(sample, b))
+    } else {
+      testStat.sample <- testStat(RtransLim(sample))
+    }
+  
+  mean(nullStats > testStat.sample) 
+  ## some people i've seen use (1 + sum(testStat.bootstrapped > testStat.sample)) / (length(testStat.bootstrapped) + 1)
+  ## To eliminate p-values of 0 should i do that? 
+}
+
+
+# rosenblattTest <- function(sample, finite = FALSE, n = NULL, bootstraps = 1000){
+#   
+#   if (finite && is.null(n)) {
+#       stop("Please provide n when finite = TRUE.")
+#   }
+#   
+#   # Test statistic for the observed sample
+#   if (finite) {
+#     # we do the testStat of the transformed sample since after transforming it should be indep
+#     # computes cramer-von mises difference to the indep cop 
+#     testStat.sample <- testStat(RtransFin(sample, n))
+#   } else {
+#     testStat.sample <- testStat(RtransLim(sample))
+#   }
+# 
+#   # bootstrapped test stat
+#   
+#   # testStat.bootstrapped <- replicate(bootstraps, {
+#   #     if (finite){
+#   #         # simulate from null copula 
+#   #         hyp_cop <- rcopFin(nrow(sample), k = ncol(sample), blockSize = n)
+#   #         hyp_cop <- pobs(hyp_cop) # ranks
+#   #         # no need for estimation bc no theta
+#   #         transformed <- RtransFin(hyp_cop, n) #rosenblatt
+#   #     }
+#   #     else{ # testing against limit copula 
+#   #       hyp_cop <- rcop(nrow(sample), k = ncol(sample))
+#   #       hyp_cop <- pobs(hyp_cop)
+#   #       # no theta
+#   #       transformed <- RtransLim(hyp_cop) #rosenblatt 
+#   #     }
+#   #     testStat(transformed)
+#   # })
+#   L <- as.list(rep(nrow(sample),bootstraps)) #list to contain the bootstrap replicates
+#   if(finite){
+#     # generate boot replicates from the null
+#     L <- lapply(L,FUN=function(l){rcopFin(l, k = ncol(sample), blockSize = n)})
+#     # take their ranks, no need for estimation because no theta
+#     L <- lapply(L, FUN=function(l){pobs(l)})
+#     # transform all the nulls 
+#     M <- lapply(L,FUN=function(sample){testStat(RtransFin(sample, n=n))})
+#   }
+#   else{
+#     L <- lapply(L,FUN=function(l){rcop(l, k = ncol(sample))})
+#     L <- lapply(L, FUN=function(l){pobs(l)})
+#     M <- lapply(L,FUN=function(sample){testStat(RtransLim(sample))})
+#   }
+#   # M is a list that contains all the test stats of the bootstrap samples 
+#   testStat.bootstrapped <- unlist(M)
+#   mean(testStat.bootstrapped > testStat.sample) 
+#   ## some people i've seen use (1 + sum(testStat.bootstrapped > testStat.sample)) / (length(testStat.bootstrapped) + 1)
+#   ## To eliminate p-values of 0 should i do that? 
+# }
   
   
 # quantile functions for largest and second largest margins 
