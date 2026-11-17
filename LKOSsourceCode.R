@@ -22,24 +22,24 @@ inv_phi <- function(x, k){
   return(exp(-t))
 }
 
-#phi_{k,n}(x) for finite block size n 
-phiFin <- function(x, k, n){ ## note here n is block size not sample size 
+#phi_{k,b}(x) for finite block size b 
+phiFin <- function(x, k, b){ 
   
   mapply(function(y, j, b){
     y*sum( choose(b, 0:(j-1)) * (y^(-1/b) -1)^(0:(j-1)))
-  }, x, k, n)
+  }, x, k, b)
   # sapply(x, function(y){
   #   y*sum( choose(n,0:(k-1)) * (y^(-1/n)-1)^(0:(k-1)))  
   # })
 }
 
-#inverse of phi_{k,n}(x) for finite block size n
-inv_phiFin <- function(x, k, n){
-  t <- 1 - qbeta(1-x, k, n-k+1)
-  return(t^n)
+#inverse of phi_{k,b}(x) for finite block size b
+inv_phiFin <- function(x, k, b){
+  t <- 1 - qbeta(1-x, k, b-k+1)
+  return(t^b)
 }
 
-# generate a sample of size n from a copula for the largest k order statistics
+# generate a sample of size n from the asymptotic copula (as block size b -> infty) for the largest k order statistics
 rcop <- function(n, k){
   U1 <- runif(n)
   
@@ -94,16 +94,6 @@ vecRtransLim <- function(u){
 }
 
 
-# # for now: updated rosenblatt transform for just the largest 2 
-# vecRtransLim.TT <- function(u){
-#   k <- length(u)
-#   e <- numeric(k)
-#   
-#   e[1] <- u[1]
-#   e[2] <- if (u[2] >= u[1]*(1-log(u[1]))) 1 else inv_phi(u[2], 2) / inv_phi(u[1] , 1)
-#   e
-# }
-
 # for a whole copula sample in matrix
 RtransLim <- function(data){
   return(t(apply(data, 1, vecRtransLim)))
@@ -123,7 +113,8 @@ F2_inverse <- function(x, n){
 
 
 # helper function
-vecRtransFin <- function(u, n){
+# computes rosenblatt transform of a vector u using the copula for a finite block size b 
+vecRtransFin <- function(u, b){
   k <- length(u) 
   e <- numeric(k)
   
@@ -131,30 +122,19 @@ vecRtransFin <- function(u, n){
   if (k==1) return(e)
   
   # compute all the inverses once
-  v <- inv_phiFin(u, 1:k, n)
-  bdry <- phiFin(v[1:(k-1)], 2:k, n)
+  v <- inv_phiFin(u, 1:k, b)
+  bdry <- phiFin(v[1:(k-1)], 2:k, b)
   
-  e[2:k] <- ifelse(u[2:k] >= bdry, 1, (v[2:k] / v[1:(k-1)])^((n-(2:k) + 1)/n) )
+  e[2:k] <- ifelse(u[2:k] >= bdry, 1, (v[2:k] / v[1:(k-1)])^((b-(2:k) + 1)/b) )
 
   e
 }
 
-# # adjusted temp function for just the largest 2 
-# vecRtransFin.TT <- function(u, n){
-#   k <- length(u) 
-#   e <- numeric(k)
-#   
-#   e[1] <- u[1] # first is unchanged
-#   
-#   e[2] <- if (u[2] >= phiFin(u[1], k, n)) 1 else (inv_phiFin(u[2], 2, n) / inv_phiFin(u[1] , 1, n))^( (n-j+1)/n ) 
-#   e
-# }
+# takes in a copula sample of the largest k order statistics
+# and computes the rosenblatt transform using the copula for a finite block size b
 
-# takes in a copula sample of the largest 2 order statistics
-# and computes the rosenblatt transform using the copula for a finite block size n
-
-RtransFin <- function(data, n){
-  return(t(apply(data, 1, vecRtransFin, n=n)))  
+RtransFin <- function(data, b){
+  return(t(apply(data, 1, vecRtransFin, b=b)))  
 }
 
 
@@ -167,15 +147,8 @@ RtransFin <- function(data, n){
 # computes test stat (distance from the indep copula)
 # this is test stat S_n^c from Genest copula paper (cramer-von mises)
 testStat<-function(data){
-  # sum(
-  #   apply(data, 1, function(row) { #apply this function to each row of data
-  #     (D(row, data) - prod(row))^2
-  #   })
-  #   )
-  
-  #C.n should take in pseudo-observations
-  #i am feeding it rosenblatt transformed pseudo-observations 
-  
+  # C.n should take in pseudo-observations
+  # I am feeding it rosenblatt transformed pseudo-observations 
   sum(
     apply(data, 1, function(row){ # apply this function to each row of data
       (C.n(row, data) - prod(row))^2
@@ -196,17 +169,17 @@ nullDistSim <- function(n, k, finite = FALSE, b = NULL, boot = 1000 ){
     stop("Please provide block size when finite = TRUE.")
   }
   
-  L <- as.list(rep(nrow(sample),bootstraps)) #list to contain the bootstrap replicates
+  L <- as.list(rep(n,boot)) #list to contain the bootstrap replicates
   if(finite){
     # generate boot replicates from the null
-    L <- lapply(L,FUN=function(l){rcopFin(l, k = ncol(sample), blockSize = n)})
+    L <- lapply(L,FUN=function(l){rcopFin(l, k, blockSize = b)})
     # take their ranks, no need for estimation because no theta
-    L <- lapply(L, FUN=function(l){pobs(l)})
-    # transform all the nulls 
-    M <- lapply(L,FUN=function(sample){testStat(RtransFin(sample, n=n))})
+    L <- lapply(L, FUN=function(l){pobs(l)}) 
+    # transform all the nulls and take their test stat
+    M <- lapply(L,FUN=function(sample){testStat(RtransFin(sample, b=b))})
   }
   else{
-    L <- lapply(L,FUN=function(l){rcop(l, k = ncol(sample))})
+    L <- lapply(L,FUN=function(l){rcop(l, k)})
     L <- lapply(L, FUN=function(l){pobs(l)})
     M <- lapply(L,FUN=function(sample){testStat(RtransLim(sample))})
   }
@@ -242,8 +215,10 @@ rosenblattTest <- function(sample, nullDist){
       # computes cramer-von mises difference to the indep cop
       # this is Sn^c from genest paper 
       testStat.sample <- testStat(RtransFin(sample, b))
+      #print(testStat.sample)
     } else {
       testStat.sample <- testStat(RtransLim(sample))
+      #print(testStat.sample)
     }
   
   mean(nullStats > testStat.sample) 
